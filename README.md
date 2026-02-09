@@ -3,7 +3,7 @@
 
 ## Overview
 
-**Chart Specification** is a specification-driven reinforcement learning framework for chart-to-code generation. Given a rasterized chart image, the goal is to produce executable plotting code that faithfully reconstructs the original visualization.
+**Chart Specification** is a specification-driven reinforcement learning framework for chart-to-code generation. Given the chart image, the goal is to produce the executable plotting code that faithfully reconstructs the original visualization.
 
 Existing approaches largely rely on supervised fine-tuning (SFT) with token-level objectives. While effective at surface imitation, such methods often fail to recover the underlying structural logic of charts, leading to:
 
@@ -121,27 +121,34 @@ Unlike binary execution rewards, Spec-Align provides dense, structure-aware supe
 
 ## Installation
 
-https://verl.readthedocs.io/en/latest/start/install.html
+For installation instructions, please see the official verl documentation: https://verl.readthedocs.io/en/latest/start/install.html
 
 ---
 
 ## Data Preparation
 
+### 0. LLM API setup
+
+Please consider starting a [**Qwen3-32B**](https://huggingface.co/Qwen/Qwen3-32B) API Server.
+
 ### 1. Build Chart Specification
 
-We provide tools for extracting both semantic and runtime specifications.
+We provide tools for extracting both semantic and runtime code specifications.
+
+Please update the script `./verl/utils/reward_score/chart2code_mllm/example_extract_final_ir.py` and then localize the following parameters:
+- API Address of Qwen3-32B in scripts of directory `./verl/utils/reward_score/chart2code_mllm/`
+- dataset path chart2code-160k and ReachQA
+
+Please run the following command at the directory `./verl/utils/reward_score/`:
 
 ```bash
-cd spec_extraction
-python extract_spec.py \
-  --code_path /path/to/script.py \
-  --output_path /path/to/spec.json
+python -m chart2code_mllm.example_extract_final_ir
 ```
 
-This step:
+This is the pipeline for training dataset parquet generation:
 
+* Executes sandboxed rendering to filter out illegal dataset items.
 * Parses plotting scripts into `S_sem`
-* Executes sandboxed rendering
 * Intercepts numerical primitives to construct `S_code`
 
 ---

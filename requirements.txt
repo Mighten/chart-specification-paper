@@ -22,3 +22,6 @@ wandb
 packaging>=20.0
 uvicorn
 fastapi
+
+# [Mingchen Debugging] Export verl Checkpoint to Huggingface Safetensors files
+megatron-core==0.12.1

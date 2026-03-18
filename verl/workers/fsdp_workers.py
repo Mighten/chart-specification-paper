@@ -15,6 +15,7 @@
 The main entry point to run the PPO algorithm
 """
 
+import datetime
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ import warnings
 from dataclasses import asdict
 from typing import Optional, Union
 
+import time
 import psutil
 import torch
 import torch.distributed
@@ -107,7 +109,10 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         if not torch.distributed.is_initialized():
             rank = int(os.environ.get("RANK", 0))
             world_size = int(os.environ.get("WORLD_SIZE", 1))
-            torch.distributed.init_process_group(backend=f"cpu:gloo,{get_device_name()}:{get_nccl_backend()}", rank=rank, world_size=world_size, init_method=os.environ.get("DIST_INIT_METHOD", None))
+            # 修改超时时间 2h1m = 7260s
+            nccl_timeout = datetime.timedelta(hours=2, minutes=1)
+            logger.warn(f'[Mingchen DEBUGGING] ActorRolloutRefWorker to be initialized with nccl_timeout={repr(nccl_timeout)}')
+            torch.distributed.init_process_group(backend=f"cpu:gloo,{get_device_name()}:{get_nccl_backend()}", timeout=nccl_timeout, rank=rank, world_size=world_size, init_method=os.environ.get("DIST_INIT_METHOD", None))
 
         # build device mesh for FSDP
         world_size = torch.distributed.get_world_size()
@@ -131,6 +136,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         self._is_actor = self.role in ["actor", "actor_rollout", "actor_rollout_ref"]
         self._is_rollout = self.role in ["rollout", "actor_rollout", "actor_rollout_ref"]
         self._is_ref = self.role in ["ref", "actor_rollout_ref"]
+        self.use_orig_params = self.config.actor.fsdp_config.get("use_orig_params", False),
 
         profiler_config: Optional[ProfilerConfig] = None
         if self._is_actor:
@@ -281,6 +287,26 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 # Convert config to regular Python types before creating PEFT model
                 lora_config = {"task_type": TaskType.CAUSAL_LM, "r": self.config.model.lora_rank, "lora_alpha": self.config.model.lora_alpha, "target_modules": convert_to_regular_types(self.config.model.target_modules), "bias": "none"}
                 actor_module = get_peft_model(actor_module, LoraConfig(**lora_config))
+
+            # logger.warn(f'[Mingchen DEBUGGING] the actor model is {repr(actor_module)}')
+            # logger.warn(f'[Mingchen DEBUGGING] the actor       has `model`?                          --> {hasattr(actor_module, "model")}')
+            # logger.warn(f'[Mingchen DEBUGGING] the actor       has `visual`?(transformers <  4.52.0) --> {hasattr(actor_module, "visual")}')
+            # logger.warn(f'[Mingchen DEBUGGING] the actor model has `visual`?(transformers >= 4.52.0) --> {hasattr(actor_module.model, "visual")}')
+        
+            if self.config.actor.get("freeze_vision_tower", False):
+                vision_tower = None
+                if hasattr(actor_module, "model") and hasattr(actor_module.model, "visual"):  # transformers >= 4.52.0
+                    vision_tower = actor_module.model.visual
+                elif hasattr(actor_module, "visual"):  # transformers < 4.52.0
+                    vision_tower = actor_module.visual
+                if vision_tower is not None:
+                    vision_tower.requires_grad_(False)
+                    # 混用 requires_grad=True/False，需要设置 use_orig_params=True 使用单独的 FSDP Wrapper 处理
+                    self.use_orig_params = True
+                    logger.warning(f'[freeze_vision_tower] Vision Tower is FROZEN.')
+                else:
+                    logger.error(f'[freeze_vision_tower] Vision Tower NOT FOUND !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        
         torch.distributed.barrier()
 
         if self.rank == 0:
@@ -323,7 +349,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 actor_module,
                 cpu_offload=cpu_offload,
                 param_init_fn=init_fn,
-                use_orig_params=False,
+                use_orig_params=self.use_orig_params,
                 auto_wrap_policy=auto_wrap_policy,
                 device_id=get_device_id(),
                 sharding_strategy=sharding_strategy,  # zero3
@@ -656,27 +682,32 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             "pad_token_id": self.generation_config.pad_token_id if self.generation_config is not None else self.tokenizer.pad_token_id,
         }
         prompts.meta_info.update(meta_info)
+
         timing_generate = {}
         with self.rollout_sharding_manager:
             log_gpu_memory_usage("After entering rollout sharding manager", logger=logger)
 
             prompts = self.rollout_sharding_manager.preprocess_data(prompts)
+            
             with simple_timer("generate_sequences", timing_generate):
                 output = self.rollout.generate_sequences(prompts=prompts)
-
+            
             log_gpu_memory_usage("After rollout generation", logger=logger)
 
             output = self.rollout_sharding_manager.postprocess_data(output)
-
+            
         timing_generate.update(self.rollout_sharding_manager.timing)
+        
         # We calculate the average timing across all ranks
         # to make sure meta_info["timing"] is the same
         timing_generate = reduce_timing(timing_generate)
         output.meta_info["timing"] = timing_generate
+        
         output = output.to("cpu")
 
         # clear kv cache
         get_torch_device().empty_cache()
+        
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
@@ -833,7 +864,10 @@ class CriticWorker(Worker, DistProfilerExtension):
         import torch.distributed
 
         if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend=get_nccl_backend(), init_method=os.environ.get("DIST_INIT_METHOD", None))
+            # 修改超时时间 2h2m
+            nccl_timeout = datetime.timedelta(hours=2, minutes=2)
+            logger.warn(f'[Mingchen DEBUGGING] CriticWorker to be initialized with nccl_timeout={repr(nccl_timeout)}')
+            torch.distributed.init_process_group(backend=get_nccl_backend(), init_method=os.environ.get("DIST_INIT_METHOD", None), timeout=nccl_timeout)
         self.config = config
 
         # build device mesh for Ulysses Sequence Parallel
@@ -985,7 +1019,7 @@ class CriticWorker(Worker, DistProfilerExtension):
             critic_module = FSDP(
                 critic_module,
                 param_init_fn=init_fn,
-                use_orig_params=False,
+                use_orig_params=self.use_orig_params,
                 auto_wrap_policy=auto_wrap_policy,
                 device_id=get_device_id(),
                 sharding_strategy=sharding_strategy,
@@ -1182,7 +1216,10 @@ class RewardModelWorker(Worker, DistProfilerExtension):
         import torch.distributed
 
         if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend=get_nccl_backend(), init_method=os.environ.get("DIST_INIT_METHOD", None))
+            # 修改超时时间 2h3m
+            nccl_timeout = datetime.timedelta(hours=2, minutes=3)
+            logger.warn(f'[Mingchen DEBUGGING] RewardModelWorker to be initialized with nccl_timeout={repr(nccl_timeout)}')
+            torch.distributed.init_process_group(backend=get_nccl_backend(), init_method=os.environ.get("DIST_INIT_METHOD", None), timeout=nccl_timeout)
         self.config = config
 
         # build device mesh for Ulysses Sequence Parallel

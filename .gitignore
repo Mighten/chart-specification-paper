@@ -1,3 +1,19 @@
+# 忽略构造 chart2code IR GT数据集使用的缓存目录
+**/cache_pool_worker_dir*/
+verl/utils/reward_score/error_cases*/**
+
+
+# 忽略 Apache Parquet 数据目录
+data-rl-parquet/
+# 忽略训练输出目录
+targets/
+*.bak
+
+# 忽略 Huawei Ascend NPU 推理 metadata 目录
+kernel_meta/
+
+# 忽略 Huawei Ascend NPU 推理 extra-info 目录
+extra-info/data-dump/*
 
 **/*.pt
 **/checkpoints

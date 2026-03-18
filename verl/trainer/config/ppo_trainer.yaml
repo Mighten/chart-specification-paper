@@ -390,6 +390,9 @@ actor_rollout_ref:
     # Sampling temperature for rollout.
     temperature: 1.0
 
+    # repetition penalty for rollout
+    repetition_penalty: 1.0
+
     # Top-k sampling parameter. -1 for vLLM rollout, 0 for HF rollout.
     top_k: -1
 

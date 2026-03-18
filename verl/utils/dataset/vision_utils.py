@@ -35,6 +35,7 @@ def process_image(image: Union[dict, Image.Image]) -> Image.Image:
         assert "image" not in image, "Cannot have both `bytes` and `image`"
         image["image"] = BytesIO(image["bytes"])
 
+    # 把 resize 放到 Parquet 生成阶段，不再每次 rollout 阶段重复 resize，避免因为缩放太小导致准确率瓶颈
     return fetch_image(image)
 
 

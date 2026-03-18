@@ -19,3 +19,6 @@ torchdata
 einops
 qwen_vl_utils
 torchvision==0.20.1
+
+# [Mingchen Debugging] Export verl Checkpoint to Huggingface Safetensors files
+megatron-core==0.12.1

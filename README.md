@@ -1,6 +1,8 @@
 
 # Chart Specification: Structural Representations for Incentivizing VLM Reasoning in Chart-to-Code Generation
 
+📄[arXiv 2602.10880](https://arxiv.org/abs/2602.10880)
+
 ## Overview
 
 **Chart Specification** is a specification-driven reinforcement learning framework for chart-to-code generation. Given a chart image, the goal is to produce the executable plotting code that faithfully reconstructs the original visualization.
@@ -253,3 +255,18 @@ This work builds upon:
 * Plot2Code
 * ChartX
 * verl
+
+
+## Citation
+
+```
+@misc{he2026chartspec4vlm,
+      title={Chart Specification: Structural Representations for Incentivizing VLM Reasoning in Chart-to-Code Generation}, 
+      author={Minggui He and Mingchen Dai and Jian Zhang and Yilun Liu and Shimin Tao and Pufan Zeng and Osamu Yoshie and Yuya Ieiri},
+      year={2026},
+      eprint={2602.10880},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2602.10880}, 
+}
+```

@@ -259,4 +259,7 @@ def create_rl_sampler(data_config, dataset):
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.set_start_method("spawn", force=True)
+    print(f'[Mingchen Debugging] multiprocessing start method set: multiprocessing.set_start_method("spawn", force=True)')
     main()

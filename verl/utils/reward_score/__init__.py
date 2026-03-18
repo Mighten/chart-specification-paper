@@ -13,7 +13,12 @@
 # limitations under the License.
 # from . import gsm8k, math, prime_math, prime_code
 
+import logging
+
 from verl.utils.import_utils import deprecated
+
+
+logger = logging.getLogger(__file__)
 
 
 def default_compute_score(data_source, solution_str, ground_truth, extra_info=None, sandbox_fusion_url=None, concurrent_semaphore=None, memory_limit_mb=None):
@@ -83,7 +88,14 @@ def default_compute_score(data_source, solution_str, ground_truth, extra_info=No
         from . import search_r1_like_qa_em
 
         res = search_r1_like_qa_em.compute_score(solution_str, ground_truth)
-
+    elif data_source in ['chartqa_human_label']:
+        # 【Mingchen Debugging】 ChartQA 多模态大模型训练
+        from . import chartqa_mllm
+        res = chartqa_mllm.compute_score(solution_str, ground_truth)
+    elif data_source in ['chart2code_combo_3k', 'chart2code_combo_4k']:
+        # 【Mingchen Debugging】 chart2code 多模态训练
+        from . import chart2code_mllm
+        res = chart2code_mllm.compute_score(solution_str, ground_truth, extra_info)
     else:
         raise NotImplementedError(f"Reward function is not implemented for {data_source=}")
 

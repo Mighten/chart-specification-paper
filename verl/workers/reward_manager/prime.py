@@ -25,6 +25,10 @@ from verl import DataProto
 from verl.utils.reward_score import default_compute_score
 from verl.workers.reward_manager import register
 
+import logging
+
+logger = logging.getLogger(__file__)
+
 
 async def single_compute_score(evaluation_func, completion, reference, task, task_extra_info, executor, timeout=300.0):
     loop = asyncio.get_running_loop()
@@ -41,6 +45,7 @@ async def single_compute_score(evaluation_func, completion, reference, task, tas
 
 
 async def parallel_compute_score_async(evaluation_func, completions, references, tasks, extra_info=None, num_processes=64):
+    logger.warn('ENTER async func to init ProcessPoolExecutor')
     if extra_info is None:
         extra_info = [None] * len(tasks)
     scores = []

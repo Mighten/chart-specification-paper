@@ -59,6 +59,13 @@ from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seql
 from verl.utils.torch_functional import masked_mean
 from verl.utils.tracking import ValidationGenerationsLogger
 
+import logging
+from ...utils.logging_utils import set_basic_config as set_basic_logging_config
+set_basic_logging_config(level=logging.WARN)
+mingchen_logger = logging.getLogger(__file__[__file__.find("/verl/")+1:])
+
+
+
 WorkerType = Type[Worker]
 
 
@@ -643,7 +650,7 @@ class RayPPOTrainer:
                 "do_sample": self.config.actor_rollout_ref.rollout.val_kwargs.do_sample,
                 "validate": True,
             }
-            print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
+            # print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
 
             # pad to be divisible by dp_size
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
@@ -656,7 +663,7 @@ class RayPPOTrainer:
 
             # unpad
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
-            print("validation generation end")
+            # print("validation generation end")
 
             # Store generated outputs
             output_ids = test_output_gen_batch.batch["responses"]
@@ -672,11 +679,11 @@ class RayPPOTrainer:
             sample_scores.extend(scores)
 
             reward_extra_infos_dict["reward"].extend(scores)
-            print(f"len reward_extra_infos_dict['reward']: {len(reward_extra_infos_dict['reward'])}")
+            # mingchen_logger.warn(f"len reward_extra_infos_dict['reward']: {len(reward_extra_infos_dict['reward'])}")
             if "reward_extra_info" in result:
                 for key, lst in result["reward_extra_info"].items():
                     reward_extra_infos_dict[key].extend(lst)
-                    print(f"len reward_extra_infos_dict['{key}']: {len(reward_extra_infos_dict[key])}")
+                    # mingchen_logger.warn(f"len reward_extra_infos_dict['{key}']: {len(reward_extra_infos_dict[key])}")
 
             data_source_lst.append(test_batch.non_tensor_batch.get("data_source", ["unknown"] * reward_tensor.shape[0]))
 
@@ -927,13 +934,16 @@ class RayPPOTrainer:
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
+        mingchen_logger.warn(f'[Mingchen Debugging] is `val_before_train` enabled? {self.config.trainer.get("val_before_train", True)}')
         if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
+            mingchen_logger.warn(f'[val_before_train] BEGIN validating before training')
             val_metrics = self._validate()
             assert val_metrics, f"{val_metrics=}"
             pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
             if self.config.trainer.get("val_only", False):
                 return
+            mingchen_logger.warn(f'[val_before_train] END validating before training')
 
         # add tqdm
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
@@ -942,17 +952,28 @@ class RayPPOTrainer:
         self.global_steps += 1
         last_val_metrics = None
 
+        mingchen_logger.warn(f'BEGIN training')
         for epoch in range(self.config.trainer.total_epochs):
+            if self.global_steps > self.total_training_steps:
+                mingchen_logger.error(f'Global step Out Of Range: {self.global_steps}/{self.total_training_steps}')
+                break
+            mingchen_logger.warn(f'BEGIN epoch: {epoch + 1}/{self.config.trainer.total_epochs}')
             for batch_dict in self.train_dataloader:
+                mingchen_logger.warn(f'BEGIN global step {self.global_steps}/{self.total_training_steps} ')
                 do_profile = self.global_steps in self.config.trainer.profile_steps if self.config.trainer.profile_steps is not None else False
+                mingchen_logger.warn(f'do_profile in global step {self.global_steps}? --> {do_profile}')
                 if do_profile:
                     self.actor_rollout_wg.start_profile()
+                    mingchen_logger.warn(f'[Profile] FINISHED `self.actor_rollout_wg.start_profile()`in global step {self.global_steps}.')
                     if self.use_reference_policy:
                         self.ref_policy_wg.start_profile()
+                        mingchen_logger.warn(f'[Profile] FINISHED `self.ref_policy_wg.start_profile()` in global step {self.global_steps}.')
                     if self.use_critic:
                         self.critic_wg.start_profile()
+                        mingchen_logger.warn(f'[Profile] FINISHED `self.critic_wg.start_profile()` in global step {self.global_steps}.')
                     if self.use_rm:
                         self.rm_wg.start_profile()
+                        mingchen_logger.warn(f'[Profile] FINISHED `self.rm_wg.start_profile()` in global step {self.global_steps}.')
 
                 metrics = {}
                 timing_raw = {}
@@ -1158,6 +1179,7 @@ class RayPPOTrainer:
                     if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
                         with marked_timer("save_checkpoint", timing_raw, color="green"):
                             self._save_checkpoint()
+                        mingchen_logger.warn(f'Checkpoint saved in global step {self.global_steps}')
 
                 # training metrics
                 metrics.update(
@@ -1175,8 +1197,10 @@ class RayPPOTrainer:
 
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)
+                mingchen_logger.warn(f'[BATCH] metrics collected in global step {self.global_steps}: {json.dumps(metrics, sort_keys=False)}')
 
                 progress_bar.update(1)
+                mingchen_logger.warn(f'END global step {self.global_steps}/{self.total_training_steps}')
                 self.global_steps += 1
 
                 if do_profile:
@@ -1190,5 +1214,8 @@ class RayPPOTrainer:
 
                 if is_last_step:
                     pprint(f"Final validation metrics: {last_val_metrics}")
+                    mingchen_logger.warn(f'[STEP-LAST] epoch {epoch + 1}, step {self.global_steps}')
                     progress_bar.close()
                     return
+            
+            mingchen_logger.warn(f'END epoch: {epoch + 1}/{self.config.trainer.total_epochs}')

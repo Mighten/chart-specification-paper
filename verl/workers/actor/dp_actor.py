@@ -18,6 +18,7 @@ Single Process Actor
 """
 
 import itertools
+import json
 import logging
 import os
 from typing import Tuple
@@ -38,6 +39,10 @@ from verl.utils.torch_functional import logprobs_from_logits
 from verl.utils.ulysses import gather_outpus_and_unpad, ulysses_pad, ulysses_pad_and_slice_inputs
 from verl.workers.actor import BasePPOActor
 
+from ...utils.logging_utils import set_basic_config as set_basic_logging_config
+set_basic_logging_config(level=logging.WARN)
+
+
 if is_cuda_available:
     from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
 elif is_npu_available:
@@ -46,8 +51,8 @@ elif is_npu_available:
 
 __all__ = ["DataParallelPPOActor"]
 
-logger = logging.getLogger(__file__)
-logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
+logger = logging.getLogger(__file__[__file__.find("/verl/")+1:])
+# logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
 class DataParallelPPOActor(BasePPOActor):
@@ -511,6 +516,8 @@ class DataParallelPPOActor(BasePPOActor):
                         loss = policy_loss / self.gradient_accumulation
                     loss.backward()
 
+                    # 最好在 Actor 反向传播后验证一下 Vision Tower 的 grad 字段是 None
+
                     data = {
                         "actor/pg_loss": pg_loss.detach().item(),
                         "actor/pg_clipfrac": pg_clipfrac.detach().item(),
@@ -523,4 +530,5 @@ class DataParallelPPOActor(BasePPOActor):
                 data = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, data)
         self.actor_optimizer.zero_grad()
+        logger.warn(f'In PPO epoch {epoch}, total metrics: {json.dumps(metrics, ensure_ascii=False)}')
         return metrics

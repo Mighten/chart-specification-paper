@@ -15,6 +15,7 @@
 Contain small torch utilities
 """
 
+import logging
 import math
 from contextlib import contextmanager
 from typing import Dict, List, Optional, Union
@@ -44,6 +45,9 @@ try:
     NPU_CROSS_ENTROPY_LOSS_AVAILABLE = hasattr(torch_npu, "npu_cross_entropy_loss")
 except ImportError:
     NPU_CROSS_ENTROPY_LOSS_AVAILABLE = False
+
+
+logger = logging.getLogger(__file__)
 
 
 def gather_from_labels(data, label):
@@ -349,6 +353,7 @@ def postprocess_data(
         input_ids = pad_sequence_to_length(input_ids, max_seq_len=max_length, pad_token_id=pad_token_id, left_pad=left_pad)
         attention_mask = pad_sequence_to_length(attention_mask, max_seq_len=max_length, pad_token_id=0, left_pad=left_pad)
     elif sequence_length > max_length:
+        logger.error(f'[Truncation] sequence length exceeded! max_length={max_length}, actual sequence_length={sequence_length}, truncation `{truncation}` applied.')
         if truncation == "left":
             # actually, left truncation may not be reasonable
             input_ids = input_ids[:, -max_length:]

@@ -49,6 +49,10 @@ from verl.workers.rollout.base import BaseRollout
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
+logging.basicConfig(format='[%(processName)s:%(threadName)s] %(asctime)s %(levelname)s %(name)s:%(lineno)d %(funcName)s - %(message)s', level=logging.WARNING)
+mingchen_logger = logging.getLogger(__file__)
+
+
 # TODO
 # 1. support pp in vllm
 # 2. passing tokenizer is not necessary? no encoding/decoding is happending here
@@ -144,6 +148,7 @@ class vLLMRollout(BaseRollout):
             n=1,
             logprobs=0,  # can be set to 0 and let actor to recompute
             max_tokens=config.response_length,
+            repetition_penalty=config.get('repetition_penalty', 1.0),
         )
 
         # we may detokenize the result all together later
@@ -160,7 +165,7 @@ class vLLMRollout(BaseRollout):
 
         print(f"kwargs: {kwargs}")
         self.sampling_params = SamplingParams(**kwargs)
-
+        mingchen_logger.warning(f'original vllm rollout SamplingParams initialized to be: {repr(self.sampling_params)}')
         self.pad_token_id = tokenizer.pad_token_id
 
     @contextmanager

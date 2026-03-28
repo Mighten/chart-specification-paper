@@ -2,9 +2,7 @@
 **/cache_pool_worker_dir*/
 verl/utils/reward_score/error_cases*/**
 
-
-# 忽略 Apache Parquet 数据目录
-data-rl-parquet/
+.vscode
 # 忽略训练输出目录
 targets/
 *.bak

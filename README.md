@@ -129,19 +129,35 @@ For installation instructions, please see the official verl documentation: https
 
 ## Data Preparation
 
+*ChartStruct-1k*, *ChartStruct-2k*, *ChartStruct-3k* and *ChartStruct-4k* are mainly built from **Chart2code-160k** and **ReachQA** datasets:
+- **Chart2code-160k** can be found on: https://huggingface.co/datasets/xxxllz/Chart2Code-160k
+- **ReachQA** can be found on: https://github.com/hewei2001/ReachQA/tree/main/data/reachqa_train
+
 ### 0. LLM API setup
 
 Please start a [**Qwen3-32B**](https://huggingface.co/Qwen/Qwen3-32B) API Server.
 
-### 1. Build Chart Specification
+### 1. Parse dataset with Qwen3-32B
 
 We provide tools for extracting both semantic and runtime code specifications.
 
-Please update the script `./verl/utils/reward_score/chart2code_mllm/example_extract_final_ir.py` and then set the following parameters:
-- API Address of Qwen3-32B in scripts of directory `./verl/utils/reward_score/chart2code_mllm/`
-- dataset path for chart2code-160k and ReachQA
+In the code file `./verl/utils/reward_score/chart2code_mllm/qwen_v2_5_72b.py`:
+- set the *Qwen3-32B* API Address for the list variable `provider_url_pool` at Line 15. Add multiple *Qwen3-32B* API addresses are preferred if available.
 
-Please run the following command in the directory `./verl/utils/reward_score/`:
+In the code file `./verl/utils/reward_score/chart2code_mllm/example_extract_final_ir.py`, please configure the following parameters:
+- Line 96, `chart2code_160k_full_json_filepath`: the  filepath for `chart2code.json` in deflated archive file https://huggingface.co/datasets/xxxllz/Chart2Code-160k/blob/main/json.tar.gz
+- Line 97, `chart2code_160k_img_base_dir`: the path of the folder for deflated archive file https://huggingface.co/datasets/xxxllz/Chart2Code-160k/blob/main/images.tar.gz
+- Line 128, `cache_result_base_dir`: the output dir for temp storage of **Chart2code-160k**
+- Line 155, `input_raw_jsonl_filepath`: the JSONL filepath built by `./examples/data_preprocess/chart2code_train_dataset_factory/build_jsonl_from_reachqa_dir.py`, which will convert **ReachQA** dataset folder into JSONL file.
+- Line 156, `cache_result_base_dir`: the output dir for temp storage of **ReachQA**
+
+After builder parameters set, now we will toggle and initialize the conversion in file `./verl/utils/reward_score/chart2code_mllm/example_extract_final_ir.py`: 
+- for **Chart2code-160k** dataset conversion, turn ON Line 124 and turn OFF Line 154
+- for **ReachQA** dataset conversion, turn ON Line 154 and turn OFF Line 124
+
+In the working directory `./verl/utils/reward_score/`:
+- rename `math.py` to `math_utils.py` to avoid incorrect package importation
+- start conversion:
 
 ```bash
 python -m chart2code_mllm.example_extract_final_ir
@@ -155,86 +171,109 @@ This command runs the pipeline for generating the training dataset:
 
 ---
 
-### 2. Construct ChartStruct
+### 2. Construct ChartStruct Parquet file
 
-To build a balanced training set:
+Convert the cache dir into JSONL for parquet building:
 
 ```bash
-
+python examples/data_preprocess/chart2code_train_dataset_factory/build_jsonl_from_cache_process_pool_worker_dir.py
 ```
 
+Select the appropriate Parquet builder code file, and modify the `--local_dir` for destination of Parquet file:
+
+```bash
+# ChartStruct-1k with CoT
+python examples/data_preprocess/verl_grpo_mllm_chart2code_ChartStruct_1k_dataset.py
+
+# ChartStruct-2k with CoT
+python examples/data_preprocess/verl_grpo_mllm_chart2code_ChartStruct_2k_dataset.py
+
+# ChartStruct-3k with CoT
+python examples/data_preprocess/verl_grpo_mllm_chart2code_combo_3k_dataset.py
+python examples/data_preprocess/verl_grpo_mllm_chart2code_random_select_3k_dataset.py
+
+# ChartStruct-3k without CoT
+python examples/data_preprocess/verl_grpo_mllm_chart2code_combo_3k_dataset_RL_no_CoT_Ablation.py
+
+# ChartStruct-4k with CoT
+python examples/data_preprocess/verl_grpo_mllm_chart2code_ChartStruct_4k_dataset.py
+python examples/data_preprocess/verl_grpo_mllm_chart2code_random_select_4k_dataset.py
+
+# ChartStruct-4k without CoT
+python examples/data_preprocess/verl_grpo_mllm_chart2code_ChartStruct_4k_dataset_RL_no_CoT_Ablation.py
+```
 
 ---
 
 ## Training
 
-We use **Qwen2.5-VL-7B** as the backbone and optimize with GRPO.
+We use **Qwen2.5-VL-7B-Instruct** as the backbone and optimize with GRPO.
 
 ### Launch Training
 
+To reproduce the main experiment, run the following command
 ```bash
-bash train_grpo.sh
+# Train Qwen2.5-VL-7B-Instruct with ChartStruct-4k
+bash chart2code-mllm-grpo-Qwen2.5-VL-7B-Instruct-Ablation-scaling-ChartStruct_4k-select-charts.sh
 ```
 
-Important arguments in `train_grpo.sh`:
+However, important arguments in all `chart2code-*.sh` and their detailed meanings:
 
 ```bash
---model_path /path/to/Qwen2.5-VL-7B
---data_path ./data/chartstruct_4k
---rollout_num 16
---batch_size 32
---lr 4e-7
---kl_coef 0.001
+    algorithm.adv_estimator=grpo \
+    data.train_batch_size=32 \
+    data.max_prompt_length=3000 \
+    data.max_response_length=3000 \
+    +actor_rollout_ref.actor.freeze_vision_tower=True \
+    +actor_rollout_ref.rollout.freeze_vision_tower=True \
+    +actor_rollout_ref.rollout.limit_images=1 \
+    +actor_rollout_ref.rollout.limit_videos=0 \
+    +actor_rollout_ref.rollout.limit_audios=0 \
+    actor_rollout_ref.rollout.temperature=0.8 \
+    actor_rollout_ref.rollout.n=16 \
+    trainer.total_epochs=5 \
+    ......
 ```
+- **Core Algorithm Settings**
+  - `algorithm.adv_estimator=grpo`: This parameter sets the advantage estimator to GRPO (Group Relative Policy Optimization), making it ideal for the chart-to-code task.
+- **Data Loading & Sequence Length Configurations**
+  - `data.train_batch_size=32`: Defines the batch size for training, representing the number of samples processed per training step. This value balances training efficiency, GPU memory usage, and training stability.
+  - `data.max_prompt_length=3000`: Specifies the maximum token length for input prompts. Any input prompts exceeding this limit will be truncated to prevent out-of-memory errors and maintain computational efficiency.
+  - `data.max_response_length=3000`: Controls the maximum token length for model-generated responses. This caps the output length to avoid overly long generations and aligns with the requirements of the chart-to-code task.
+- **Multimodal Constraints**
+  - `+actor_rollout_ref.actor/rollout.freeze_vision_tower=True`: Freezes the vision tower (visual encoder) of the multimodal model during the actor training phase. The vision encoder is already pre-trained on general visual data and retains fixed weights, reducing memory consumption and training complexity while preserving strong visual understanding capabilities.
+  - `+actor_rollout_ref.rollout.limit_images=1`: Restricts each input sample to contain exactly one image. This setting is customized for chart-based tasks, as each training sample corresponds to a single chart image paired with textual prompts.
+  - `+actor_rollout_ref.rollout.limit_videos=0`: Disables video input entirely, as the target chart-to-code task does not involve video data.
+  - `+actor_rollout_ref.rollout.limit_audios=0`: Disables audio input entirely, since no audio modalities are used in this training pipeline.
+- **Training Schedule**
+  - `actor_rollout_ref.rollout.n=16`: Sets the number of candidate responses generated per input prompt during the rollout phase. This is a core hyperparameter for GRPO, as the algorithm uses 16 parallel outputs to compute group-based rewards and refine the model policy.
+  - `trainer.total_epochs=5`: Defines the total number of full training epochs, meaning the model will iterate over the entire training dataset 5 times. This controls overall training duration and helps the model converge without overfitting to the training data.
 
-Training setup (default):
+**Note**: In lower version of vLLM rollout engine, the stuck may happen during actor model rollout, update the version of vLLM, or locally patch the vllm according to this patch PR:
+https://github.com/vllm-project/vllm/pull/16371/changes
 
-* 3 epochs
-* 8 × A100 (80GB)
-* ~62 hours
-* Visual encoder frozen
-* Full LM + projector fine-tuned
+
+**Training Summary**:
+- 5 epochs
+- 8 × NVIDIA A100 (80GB)
+- ~62 hours
+- Visual encoder frozen, while only the MLP and Projector trained
 
 ---
 
-## Reproducing Main Results
-
-To reproduce the 4K ChartSpec model:
-
-### Step 1 — Build 4K ChartStruct
-
-```bash
-```
-
-### Step 2 — Train with Spec-Align RL
-
-```bash
-```
-
-## Project Structure
+## Project Structure (Modification from verl)
 
 ```
-ChartSpec/
-├── spec_extraction/        # Chart Specification extraction
-├── data/                   # ChartStruct construction
-├── reward/                 # Spec-Align reward implementation
-├── training/               # GRPO optimization
-├── evaluation/             # Benchmark evaluation scripts
-└── scripts/                # Launch scripts
+├───data-rl-parquet  # training data Parquet  
+├───examples
+│   └───data_preprocess  # Parquet builders
+├───verl
+│   └───utils
+│       └───reward_score
+│           └───chart2code_mllm  # the chart2code reward computing codes
+│               └───lowlevel  # Chart Code Spec related files 
+└ chart2code-*.sh  # the training scripts
 ```
-
----
-<!--
-
-## Citation
-
-If you find this work useful, please cite:
-
-```bibtex
-@article{,
-}
-```
--->
 
 ---
 
